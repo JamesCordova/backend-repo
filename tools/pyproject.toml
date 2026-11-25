@@ -25,6 +25,8 @@ axial-phantoms = "axial_tools.phantoms:main"
 axial-bench = "axial_tools.run_bench:main"
 axial-ssim = "axial_tools.ssim:main"
 axial-stats = "axial_tools.stats:main"
+axial-datasets = "axial_tools.datasets:main"
+axial-upload = "axial_tools.upload:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -14,7 +14,7 @@ agregan dependencias al servicio):
 ```bash
 cd backend-repo/tools
 uv sync --extra dev
-uv run pytest            # 19 tests: fantasmas leidos de vuelta + estadistica con datos conocidos
+uv run pytest            # 27 tests: fantasmas, lectores NRRD/PVM/DDS/DICOM, estadistica
 uv run ruff check src tests
 ```
 
@@ -53,6 +53,51 @@ voxel, defectos realmente presentes).
 fantasmas. Depende de las decisiones abiertas del plan (int16 HU, rechazar o
 remuestrear DICOM no uniforme, NIfTI 4D) y de la subida de NIfTI.
 
+## 1b. Datos reales abiertos (`axial-datasets`, `axial-upload`)
+
+```bash
+uv run axial-datasets list
+uv run axial-datasets fetch --out out/datasets --lods        # descarga (cache) + NIfTI + preview 4 mm / full 1 mm
+uv run axial-upload --only tcia_lidc_0001,tcia_pancreas_0051,cabeza_philips_dicom,klacansky_stent
+```
+
+Catálogo (`src/axial_tools/datasets.py`, con fuente y licencia de cada uno):
+
+| Id | Región | Formato | Uso |
+| --- | --- | --- | --- |
+| `tcia_lidc_0001` | tórax | DICOM, 133 cortes (TCIA LIDC-IDRI, CC BY 3.0) | medición vía backend, validación |
+| `tcia_pancreas_0051` | abdomen | DICOM, 185 cortes, almacenado LAI (TCIA Pancreas-CT, CC BY 3.0) | medición vía backend, orientación |
+| `tcia_cptac_head_cor` | cabeza | DICOM **coronal** real (TCIA CPTAC-AML, CC BY 4.0) | CP-F06 |
+| `cabeza_philips_dicom` | cabeza | CT_Philips (HU reales) reescrito como serie DICOM axial | medición vía backend (no hay una serie de cabeza completa pública por la API de TCIA) |
+| `slicer_ct_chest`, `niivue_ct_abdo`, `niivue_ct_philips` | tórax / abdomen / cabeza | NRRD / NIfTI en HU | validación local |
+| `niivue_ct_pitch`, `niivue_ct_avm` | cabeza | NIfTI no-HU (pitch: afín oblicua) | validación del aviso de oblicuidad |
+| `klacansky_stent` | abdomen | RAW uint16 + NHDR (HU + 1024) | RAW con parámetros conocidos (CP-F07), medición |
+| `klacansky_pancreas`, `klacansky_vis_male` | — | RAW + NHDR | **su NHDR declara mal los ejes** (el eje de 240/128 cortes figura como L–R): se ven rotados; no usar para orientación |
+| `ot_ct_head`, `ot_cadaver`, `ot_ct_chest`, `ot_ct_abdomen` | — | PVM (DDS) de open-terrain | PVM no guarda orientación: se asume RAS y la vista sale arbitraria |
+
+Notas: klacansky solo responde por `http` (el `https` rechaza la conexión) y
+open-terrain tiene un certificado `https` que no coincide: ambos se bajan
+por `http`. Los lectores NRRD y PVM/DDS son propios (el decodificador DDS se
+implementó desde la descripción del formato; tests con un codificador
+mínimo escrito según la misma especificación).
+
+**Verificado** (Edge + Intel): en los 15 volúmenes, dims, afín y códigos de
+ejes del frontend son idénticos a nibabel y `sampleAt` coincide exacto en 20
+vóxeles aleatorios por volumen.
+
+**Bugs del backend encontrados con estos datos y corregidos** (con tests):
+
+1. `load_series` apilaba los cortes en el orden de los archivos: las
+   exportaciones de TCIA no están en orden espacial (los dos primeros
+   archivos de LIDC están a 70 mm), así que el volumen salía mezclado y con
+   el espaciado en z mal (preview de LIDC con 6 cortes en vez de 83). Ahora
+   se ordenan por `ImagePositionPatient` proyectada sobre la normal.
+2. Plan E.2: la orientación se perdía (dirección identidad siempre). Ahora
+   `Volume` lleva `direction`/`origin` y el remuestreo deja el volumen en la
+   grilla canónica (dirección identidad de ITK, caja física de la entrada) en
+   el mismo `sitk.Resample`. Pancreas-CT (LAI) y la serie coronal de CPTAC se
+   ven igual vía backend que leídas de forma independiente.
+
 ## 2. Mediciones (B)
 
 ### Requisitos de la maquina
@@ -61,10 +106,13 @@ remuestrear DICOM no uniforme, NIfTI 4D) y de la subida de NIfTI.
   estudios del backend, el monolito corriendo.
 - Navegador **real con ventana** (el script usa `headless=False`). Edge/Chrome
   se usan instalados (`channel`); para Firefox: `uv run playwright install firefox`.
-- GPU elegida a mano en *Configuracion > Pantalla > Graficos* de Windows para
-  el ejecutable del navegador (perfil A = integrada, B = dedicada). Cada JSON
-  guarda `meta.gpu.renderer` (UNMASKED_RENDERER_WEBGL): es la evidencia; el
-  script avisa si ve un renderer por software (SwiftShader).
+- GPU: en Chrome/Edge el runner la fuerza según el perfil
+  (`--force_low_power_gpu` para A, `--force_high_performance_gpu` para B;
+  verificado en esta laptop: Intel integrada vs RTX 3050 6 GB). Pasar
+  `--expect-gpu Intel` / `--expect-gpu NVIDIA` para cortar si quedó la otra.
+  En Firefox no hay bandera: fijarla en *Configuración > Pantalla > Gráficos*
+  de Windows. Cada JSON guarda `meta.gpu.renderer` (UNMASKED_RENDERER_WEBGL)
+  como evidencia; el script avisa si ve un renderer por software.
 - Corriente conectada, modo de alto rendimiento, sin otras aplicaciones.
 
 ### Plan y corrida

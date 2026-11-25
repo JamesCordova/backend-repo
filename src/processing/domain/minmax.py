@@ -13,6 +13,8 @@ real con una ventana fija; aca hay dos variantes:
   escala de origen (ej. un .raw de 8 bits ya pre-procesado para visualizar).
 """
 
+from dataclasses import replace
+
 import numpy as np
 
 from processing.domain.entities import Volume
@@ -28,7 +30,8 @@ def normalize_range(volume: Volume, min_value: float, max_value: float) -> Volum
 
     clipped = np.clip(volume.pixel_array, min_value, max_value)
     scaled = (clipped - min_value) / (max_value - min_value)
-    return Volume(pixel_array=scaled.astype(np.float32), spacing=volume.spacing)
+    # replace (no Volume(...)): conserva spacing y la geometria (direction/origin)
+    return replace(volume, pixel_array=scaled.astype(np.float32))
 
 
 def normalize_minmax(volume: Volume) -> Volume:
@@ -43,8 +46,6 @@ def normalize_minmax(volume: Volume) -> Volume:
         # Volumen constante (o vacio) -- no hay contraste que mostrar de
         # todas formas; evita division por cero devolviendo todo en 0 en vez
         # de lanzar, un volumen "plano" es un resultado valido, no un error.
-        return Volume(
-            pixel_array=np.zeros_like(array, dtype=np.float32), spacing=volume.spacing
-        )
+        return replace(volume, pixel_array=np.zeros_like(array, dtype=np.float32))
 
     return normalize_range(volume, minimum, maximum)

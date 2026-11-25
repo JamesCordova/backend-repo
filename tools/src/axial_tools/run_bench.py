@@ -7,6 +7,8 @@
   (UNMASKED_RENDERER_WEBGL): es la evidencia de perfil A (integrada) vs B (dedicada). El
   cambio de GPU se hace a mano en "Configuracion de graficos" de Windows por ejecutable; este
   script solo registra cual quedo y avisa si detecta un renderer por software.
+- Perfil A/B: en Chrome/Edge se fuerza la GPU con --force_low_power_gpu / --force_high_performance_gpu
+  (usar --expect-gpu Intel / NVIDIA para cortar si quedo la otra).
 - Chrome/Edge se lanzan sin vsync (--disable-gpu-vsync --disable-frame-rate-limit) y Firefox
   con layout.frame_rate = 0; si no, todas las configuraciones darian 60 FPS.
 - Cada modo corre en una pagina nueva. Carga: `load_visits` visitas (la primera se descarta
@@ -49,6 +51,10 @@ from playwright.sync_api import Browser, Playwright, sync_playwright
 SOFTWARE_RENDERERS = ("swiftshader", "llvmpipe", "basic render", "software")
 CHROMIUM_ARGS = ["--disable-gpu-vsync", "--disable-frame-rate-limit", "--ignore-gpu-blocklist"]
 FIREFOX_PREFS = {"layout.frame_rate": 0, "webgl.force-enabled": True}
+# Laptops con dos GPU: Chromium/Edge eligen la GPU con estas banderas (verificado en Windows 11:
+# Intel integrada vs RTX 3050). Firefox no tiene equivalente: ahi hay que fijarla en
+# Configuracion > Pantalla > Graficos de Windows.
+PROFILE_GPU_FLAGS = {"A": "--force_low_power_gpu", "B": "--force_high_performance_gpu"}
 
 
 def login(api_url: str, email: str, password: str) -> str:
@@ -60,11 +66,14 @@ def login(api_url: str, email: str, password: str) -> str:
         return json.load(resp)["access_token"]
 
 
-def launch(p: Playwright, browser: str) -> Browser:
+def launch(p: Playwright, browser: str, profile: str, select_gpu: bool) -> Browser:
     if browser == "firefox":
         return p.firefox.launch(headless=False, firefox_user_prefs=FIREFOX_PREFS)
     channel = {"msedge": "msedge", "chrome": "chrome", "chromium": None}[browser]
-    return p.chromium.launch(headless=False, channel=channel, args=CHROMIUM_ARGS)
+    args = list(CHROMIUM_ARGS)
+    if select_gpu and profile in PROFILE_GPU_FLAGS:
+        args.append(PROFILE_GPU_FLAGS[profile])
+    return p.chromium.launch(headless=False, channel=channel, args=args)
 
 
 def run_page(browser: Browser, url: str, timeout_s: float, log_path: Path) -> tuple[dict, dict]:
@@ -85,11 +94,13 @@ def run_page(browser: Browser, url: str, timeout_s: float, log_path: Path) -> tu
     return result, images
 
 
-def check_gpu(result: dict) -> None:
+def check_gpu(result: dict, expect: str | None) -> None:
     renderer = ((result.get("meta") or {}).get("gpu") or {}).get("renderer") or ""
     if any(s in renderer.lower() for s in SOFTWARE_RENDERERS):
         print(f"  !!! ATENCION: renderer por software ({renderer}). Estos numeros NO sirven.",
               file=sys.stderr)
+    if expect and expect.lower() not in renderer.lower():
+        raise SystemExit(f"La GPU reportada ({renderer}) no contiene '{expect}': perfil equivocado")
 
 
 def save(folder: Path, name: str, result: dict, images: dict, runner: dict) -> None:
@@ -135,6 +146,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--password", default=os.environ.get("AXIAL_PASSWORD"))
     parser.add_argument("--only-mode", choices=["load", "fps", "capture"])
     parser.add_argument("--skip-existing", action="store_true", help="no repetir JSON ya guardados")
+    parser.add_argument("--no-gpu-flag", action="store_true",
+                        help="no forzar la GPU por bandera (usar la de Windows)")
+    parser.add_argument("--expect-gpu", default=None,
+                        help="texto que debe aparecer en la GPU reportada (ej. Intel, NVIDIA); "
+                             "si no aparece, se corta la corrida")
     args = parser.parse_args(argv)
 
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
@@ -144,7 +160,7 @@ def main(argv: list[str] | None = None) -> None:
         token = login(plan.get("api_url", "http://localhost:8000"), args.email, args.password)
 
     with sync_playwright() as p:
-        browser = launch(p, args.browser)
+        browser = launch(p, args.browser, args.profile, not args.no_gpu_flag)
         version = browser.version
         print(f"{args.browser} {version}, perfil {args.profile} -> {args.out}")
         for volume, lod, mode, name, params, extra in jobs(plan):
@@ -169,7 +185,7 @@ def main(argv: list[str] | None = None) -> None:
                       **extra}
             save(folder, name, result, images or {}, runner)
             print(" ERROR: " + result["error"] if result.get("error") else f" ok ({runner['seconds']} s)")
-            check_gpu(result)
+            check_gpu(result, args.expect_gpu)
         browser.close()
 
 

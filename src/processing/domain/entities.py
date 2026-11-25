@@ -30,6 +30,13 @@ class Volume:
 
     pixel_array: np.ndarray  # shape (z, y, x), valores en Hounsfield units
     spacing: tuple[float, float, float]
+    # Geometria en el espacio del paciente, convencion de ITK/DICOM (LPS, mm) y orden
+    # (x, y, z): direction son los cosenos directores 3x3 por filas (columna i = hacia
+    # donde crece el indice x), origin es el centro del voxel (0, 0, 0). Por defecto
+    # identidad/cero: un RAW no trae orientacion. Se conservan hasta el remuestreo, que
+    # deja el volumen en la grilla canonica (direccion identidad), ver plan E.2.
+    direction: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     def __post_init__(self) -> None:
         if self.pixel_array.ndim != 3:

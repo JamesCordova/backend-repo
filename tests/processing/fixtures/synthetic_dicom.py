@@ -71,3 +71,46 @@ def write_synthetic_series(
         paths.append(path)
 
     return paths
+
+
+def write_oriented_series(
+    out_dir: Path, iop: tuple[float, ...], first_position: tuple[float, float, float],
+    num_slices: int, rows: int, cols: int, pixel_spacing: float, slice_step: float,
+) -> list[Path]:
+    """Serie con orientacion arbitraria donde cada pixel vale 10 * (coordenada S en mm,
+    redondeada): permite verificar la reorientacion mirando solo los valores."""
+    row_dir, col_dir = np.array(iop[:3], float), np.array(iop[3:], float)
+    normal = np.cross(row_dir, col_dir)
+    series_uid, study_uid = generate_uid(), generate_uid()
+    r = np.arange(rows).reshape(-1, 1)
+    c = np.arange(cols).reshape(1, -1)
+    paths = []
+    for k in range(num_slices):
+        ipp = np.array(first_position, float) + normal * slice_step * k
+        z = ipp[2] + c * pixel_spacing * row_dir[2] + r * pixel_spacing * col_dir[2]
+        pixels = np.broadcast_to(np.rint(z * 10), (rows, cols)).astype(np.int16)
+
+        file_meta = FileMetaDataset()
+        file_meta.MediaStorageSOPClassUID = CTImageStorage
+        file_meta.MediaStorageSOPInstanceUID = generate_uid()
+        file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = FileDataset(None, {}, file_meta=file_meta, preamble=b"\0" * 128)
+        ds.StudyInstanceUID, ds.SeriesInstanceUID = study_uid, series_uid
+        ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+        ds.SOPClassUID = CTImageStorage
+        ds.Modality = "CT"
+        ds.InstanceNumber = k + 1
+        ds.ImagePositionPatient = [float(v) for v in ipp]
+        ds.ImageOrientationPatient = [float(v) for v in iop]
+        ds.PixelSpacing = [pixel_spacing, pixel_spacing]
+        ds.SliceThickness = slice_step
+        ds.RescaleSlope, ds.RescaleIntercept = 1.0, 0.0
+        ds.SamplesPerPixel = 1
+        ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.Rows, ds.Columns = rows, cols
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+        ds.PixelData = pixels.tobytes()
+        path = out_dir / f"img_{k:03d}.dcm"
+        pydicom.dcmwrite(path, ds, little_endian=True, implicit_vr=False)
+        paths.append(path)
+    return paths

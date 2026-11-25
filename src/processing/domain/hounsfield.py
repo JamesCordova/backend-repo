@@ -4,6 +4,8 @@ puerto de infrastructure, a diferencia de la lectura DICOM o el resampling
 (que si necesitan una libreria de procesamiento de imagenes).
 """
 
+from dataclasses import replace
+
 import numpy as np
 
 from processing.domain.entities import Volume
@@ -18,4 +20,5 @@ def normalize_hounsfield(volume: Volume, min_hu: float, max_hu: float) -> Volume
 
     clipped = np.clip(volume.pixel_array, min_hu, max_hu)
     scaled = (clipped - min_hu) / (max_hu - min_hu)
-    return Volume(pixel_array=scaled.astype(np.float32), spacing=volume.spacing)
+    # replace (no Volume(...)): conserva spacing y la geometria (direction/origin)
+    return replace(volume, pixel_array=scaled.astype(np.float32))
