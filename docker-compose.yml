@@ -1,0 +1,62 @@
+# Orquestacion completa de Axial en UN solo repo -- antes hacian falta 3
+# repos clonados como hermanos (api-repo + worker-repo + infra-repo) y este
+# compose levantaba 5 servicios (postgres, redis, minio, api, worker). Fusionar
+# api-repo/worker-repo en este repo (ver README) dejo 3 (postgres, minio, app);
+# reemplazar MinIO por storage en filesystem local (ver README, seccion
+# "Correr sin Docker" -- los binarios community de MinIO dejaron de
+# publicarse para descarga directa a fines de 2025) deja solo 2: la base de
+# datos, y esta app (que hace de API y de "worker" a la vez, en el mismo
+# proceso, guardando los archivos en un volumen propio en vez de en un
+# servicio S3 aparte). Pensado como el compose de desarrollo local de una
+# maquina con poco espacio en disco -- para produccion real contra un S3/MinIO
+# de verdad, `storage_backend: minio` en .env sigue disponible, ver README.
+
+name: axial-backend
+
+services:
+  app:
+    build:
+      context: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # DATABASE_URL no va en .env: depende del nombre del servicio dentro
+      # de la red de Docker (postgres, no localhost).
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD}@postgres:5432/axial
+      LOCAL_STORAGE_DIR: /app/data/objects
+    volumes:
+      - objects_data:/app/data/objects
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - interna
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: axial
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Sin "ports:" -- solo accesible dentro de la red interna de Docker.
+    # Para inspeccionar en dev local: `docker compose exec postgres psql -U app axial`.
+    networks:
+      - interna
+    restart: unless-stopped
+
+networks:
+  interna:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  objects_data:

@@ -1,0 +1,74 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --extra dev --locked
+      - run: uv run ruff check .
+      # Solo unit + api de los dos lados (API y processing) -- sin Docker,
+      # feedback en segundos. tests/integration y tests/processing/integration
+      # (testcontainers, necesitan Docker) corren en el job "integration" aparte.
+      - run: >
+          uv run pytest tests/unit tests/api tests/processing/unit
+          --cov=domain --cov=application --cov=infrastructure --cov=interfaces
+          --cov=processing --cov-report=term-missing --cov-fail-under=80
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --extra dev --locked
+      # testcontainers levanta Postgres/MinIO efimeros por su cuenta -- los
+      # runners de GitHub Actions ya tienen Docker, sin configuracion extra.
+      - run: uv run pytest tests/integration tests/processing/integration -v
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: axial
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: devpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://app:devpassword@localhost:5432/axial
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --extra dev --locked
+      - run: uv run alembic upgrade head
+      # Falla si models.py cambio sin generar la migracion correspondiente --
+      # el error clasico de "olvide correr --autogenerate" queda en rojo en CI,
+      # no descubierto en produccion.
+      - run: uv run alembic check
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Solo valida que el Dockerfile sigue construyendo -- no publica a
+      # ningun registro. Una sola imagen ahora (antes dos: axial-api +
+      # axial-worker) -- ver README, seccion "De 5 servicios a 3".
+      - run: docker build -t axial-backend:ci .
