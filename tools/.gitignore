@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+# salidas generadas (reproducibles con los scripts)
+out/
+results/

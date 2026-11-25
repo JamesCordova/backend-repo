@@ -1,0 +1,41 @@
+[project]
+name = "axial-tools"
+version = "0.1.0"
+description = "Herramientas de la tesis de Axial: volumenes sinteticos (fantasmas), arnes de medicion con Playwright, SSIM y estadistica"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "nibabel>=5.2",
+    "pydicom>=3.0",
+    "scipy>=1.13",
+    "scikit-image>=0.24",
+    "statsmodels>=0.14",
+    "pillow>=10.4",
+    "playwright>=1.48",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[project.scripts]
+axial-phantoms = "axial_tools.phantoms:main"
+axial-bench = "axial_tools.run_bench:main"
+axial-ssim = "axial_tools.ssim:main"
+axial-stats = "axial_tools.stats:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
